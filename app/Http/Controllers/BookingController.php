@@ -8,6 +8,7 @@ use App\Models\Room;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\Response;
 
 class BookingController extends Controller
 {
@@ -45,9 +46,11 @@ class BookingController extends Controller
         return response()->json($booking, 201);
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, Booking $booking): Response
     {
-        Booking::findOrFail($id)->delete();
+        abort_unless($booking->user_id === $request->user()->id, 403);
+
+        $booking->delete();
 
         return response()->noContent();
     }
