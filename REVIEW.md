@@ -21,7 +21,7 @@ DB::select("SELECT id FROM bookings
 
 ### 2. Mass assignment и подмена автора в `store` (строка 37)
 
-`Booking::create($request->all())` при `user_id` в `$fillable` (`app/Models/Booking.php:11`): клиент бронирует от имени другого пользователя. Через `$request->all()` в модель попадают и любые лишние ключи.
+`Booking::create($request->all())` при `user_id` в `$fillable` (`app/Models/Booking.php:11`): клиент бронирует от имени другого пользователя. Отсутствие `user_id` — отдельная 500-ошибка (FK/NOT NULL в БД) вместо 422. Через `$request->all()` в модель попадают и любые лишние ключи.
 
 **Исправление:** FormRequest c whitelist-правилами, автор — только из токена: `Booking::create([...$validated, 'user_id' => $request->user()->id])`.
 
@@ -76,7 +76,7 @@ if ($start->hour < 9 || $start->hour >= 20)
 
 Проверка конфликта и `create` — не атомарны (check-then-act). Два одновременных запроса проходят проверку → две брони на слот.
 
-**Исправление:** (а) транзакция + `SELECT ... FOR UPDATE` на строку комнаты (или advisory lock по `room_id`) вокруг проверки; (б) надёжнее — exclusion-ограничение PostgreSQL: `EXCLUDE USING gist (room_id WITH =, tstzrange(starts_at, ends_at) WITH &&)`, конфликт ловится на insert; (в) на уровне приложения — сериализуемые транзакции. Опишу выбранный вариант в README.
+**Исправление:** (а) транзакция + `SELECT ... FOR UPDATE` на строку комнаты (или advisory lock по `room_id`) вокруг проверки; (б) надёжнее — exclusion-ограничение PostgreSQL: `EXCLUDE USING gist (room_id WITH =, tstzrange(starts_at, ends_at) WITH &&)`, конфликт ловится на insert; (в) на уровне приложения — сериализуемые транзакции. Вдобавок запросу конфликта нужен индекс `(room_id, starts_at)` — сейчас полное сканирование таблицы. Опишу выбранный вариант в README.
 
 ## Minor
 
@@ -88,11 +88,19 @@ if ($start->hour < 9 || $start->hour >= 20)
 
 Семантика REST: создание ресурса — `201 Created`. **Исправление:** `response()->json($booking, 201)` или `return response()->created(...)`.
 
-### 12. `Log::withContext` загрязняет контекст процесса (строка 39)
+### 12. `booking_id` не попадает в `bookings.log` (строки 39–40)
 
-`booking_id` остаётся в контексте логгера до конца запроса/воркера (для Octane/queue — дольше). Для одной строки лога достаточно `Log::channel('bookings')->info('Booking created', ['booking_id' => $id])`.
+`Log::withContext()` у фасада проксируется на **дефолтный** канал (`LogManager::__call` → `driver()->withContext()`), а сообщение пишется в канал `bookings` — контекст туда не доходит. Проверено вживую: в логе строка `Booking created` без `booking_id`, аудио-лог цели не выполняет. Дополнительно контекст остаётся в дефолтном канале до конца запроса (для Octane/queue — дольше).
 
-### 13. Без `Accept: application/json` неаутентифицированный запрос даёт 500 вместо 401
+**Исправление:** `Log::channel('bookings')->info('Booking created', ['booking_id' => $booking->id])` — контекст прямо в вызове, без `withContext`.
+
+### 13. Методы контроллера без типов (весь файл)
+
+`index`/`store`/`today` без return-типов, `destroy($id)` — без типа параметра. Против правил проекта (PHP 8.4, явные типы обязательны) и отличается от остального кода (модели/миграции типизированы).
+
+**Исправление:** при переписывании методов проставить типы: `public function store(StoreBookingRequest $request): JsonResponse`, `destroy(int $id)` и т.п.
+
+### 14. Без `Accept: application/json` неаутентифицированный запрос даёт 500 вместо 401
 
 Задокументировано в README как известная особенность; механизм такой. `Authenticate::unauthenticated` (`vendor/.../Auth/Middleware/Authenticate.php:87`):
 
@@ -104,7 +112,7 @@ $request->expectsJson() ? null : $this->redirectTo($request)
 
 **Исправление:** в `bootstrap/app.php`: `$middleware->redirectGuestsTo(fn () => null)` — тогда исключение дойдёт до хендлера, а `shouldRenderJsonWhen` (уже настроен на `api/*`) вернёт 401 JSON.
 
-### 14. `today()` отдаёт время без контекста таймзоны (строка 58)
+### 15. `today()` отдаёт время без контекста таймзоны (строка 58)
 
 `$b->starts_at . ' – ' . $b->ends_at` — стенное время «как лежит в БД» (см. п. 5), потребитель не знает, в каком оно поясе. **Исправление:** форматировать в tz офиса, смещение указывать явно.
 
@@ -121,4 +129,4 @@ $request->expectsJson() ? null : $this->redirectTo($request)
 1. П. 1–3 (инъекция, mass assignment, права на удаление) — безопасность.
 2. П. 4–8 (валидация + время/пересечения) — требования ТЗ, одно общее решение: FormRequest + нормализация в UTC + tz офиса для рабочего времени.
 3. П. 9 — гонка (бонус).
-4. П. 10–14 — мелочи, по ходу.
+4. П. 10–15 — мелочи, по ходу.
