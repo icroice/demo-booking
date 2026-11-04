@@ -117,6 +117,16 @@ class BookingStoreTest extends TestCase
             ->assertJsonValidationErrors('starts_at');
     }
 
+    public function test_step_error_is_attributed_to_the_violating_field(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        $this->postJson('/api/bookings', $this->payload($this->moscowRoom(), '10:00', '11:07'))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('ends_at')
+            ->assertJsonMissingValidationErrors('starts_at');
+    }
+
     public function test_rejects_booking_outside_working_hours(): void
     {
         Sanctum::actingAs(User::factory()->create());

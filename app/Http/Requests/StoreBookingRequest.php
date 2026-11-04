@@ -103,20 +103,19 @@ class StoreBookingRequest extends FormRequest
     /** Комната брони вместе с офисом (таймзона офиса нужна для проверки рабочих часов). */
     public function room(): Room
     {
-        if ($this->cachedRoom instanceof Room) {
-            return $this->cachedRoom;
-        }
-
-        $room = Room::query()->with('office')->find($this->validated('room_id'));
-
-        assert($room instanceof Room);
-
-        return $this->cachedRoom = $room;
+        // findOrFail, а не find: если комнату удалили между exists-правилом и этим вызовом,
+        // клиент получит 404 вместо TypeError (assert в проде отключён).
+        return $this->cachedRoom ??= Room::query()->with('office')->findOrFail($this->validated('room_id'));
     }
 
     private function validateDuration(Validator $v): void
     {
-        $minutes = $this->startsAt()->diffInMinutes($this->endsAt());
+        // Длительность считаем по «настенным» часам офиса: shiftTimezone сохраняет локальное
+        // время, но меняет момент — разность становится разностью показаний часов, а не секунд.
+        // Для офисов без перехода на летнее время результат тот же, что и у разности моментов.
+        $wallStart = $this->startsAtLocal()->shiftTimezone('UTC');
+        $wallEnd = $this->endsAtLocal()->shiftTimezone('UTC');
+        $minutes = $wallStart->diffInMinutes($wallEnd);
 
         if ($minutes < self::MIN_MINUTES || $minutes > self::MAX_MINUTES) {
             $v->errors()->add(
@@ -128,11 +127,9 @@ class StoreBookingRequest extends FormRequest
 
     private function validateStep(Validator $v): void
     {
-        foreach ([$this->startsAtLocal(), $this->endsAtLocal()] as $moment) {
+        foreach (['starts_at' => $this->startsAtLocal(), 'ends_at' => $this->endsAtLocal()] as $field => $moment) {
             if ($moment->minute % self::STEP_MINUTES !== 0 || $moment->second !== 0) {
-                $v->errors()->add('starts_at', sprintf('Время начала и конца должны быть кратны %d минутам.', self::STEP_MINUTES));
-
-                return;
+                $v->errors()->add($field, sprintf('Время должно быть кратно %d минутам.', self::STEP_MINUTES));
             }
         }
     }

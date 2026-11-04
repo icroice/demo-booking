@@ -8,12 +8,14 @@ use App\Models\Room;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class BookingController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request): LengthAwarePaginator
     {
         return Booking::where('user_id', $request->user()->id)
             ->orderByRaw('starts_at DESC')
@@ -65,7 +67,7 @@ class BookingController extends Controller
         return response()->noContent();
     }
 
-    public function today(Room $room)
+    public function today(Room $room): Collection
     {
         return $room->bookings()
             ->whereDate('starts_at', today())
