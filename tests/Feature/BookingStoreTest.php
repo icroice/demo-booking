@@ -177,6 +177,22 @@ class BookingStoreTest extends TestCase
         ]))->assertStatus(409);
     }
 
+    public function test_rejects_datetime_without_utc_offset(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        $room = $this->moscowRoom();
+
+        // Без явного смещения время молча трактовалось бы как UTC и уезжало бы на часы.
+        $this->postJson('/api/bookings', [
+            'room_id' => $room->id,
+            'title' => 'Без смещения',
+            'starts_at' => '2026-11-06 10:00:00',
+            'ends_at' => '2026-11-06 11:00:00',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['starts_at', 'ends_at']);
+    }
+
     public function test_validates_input_fields(): void
     {
         Sanctum::actingAs(User::factory()->create());

@@ -22,6 +22,9 @@ class StoreBookingRequest extends FormRequest
 
     private const WORK_DAY_END_HOUR = 20;
 
+    /** Дата ISO 8601 с обязательным явным смещением UTC: Z, +03:00 или +0300. */
+    private const OFFSET_REGEX = '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})$/';
+
     public function authorize(): bool
     {
         // Маршрут уже закрыт auth:sanctum; отдельной авторизации нет.
@@ -36,8 +39,8 @@ class StoreBookingRequest extends FormRequest
         return [
             'room_id' => ['required', 'integer', 'exists:rooms,id'],
             'title' => ['required', 'string', 'max:255'],
-            'starts_at' => ['required', 'date'],
-            'ends_at' => ['required', 'date', 'after:starts_at'],
+            'starts_at' => ['required', 'date', 'regex:'.self::OFFSET_REGEX],
+            'ends_at' => ['required', 'date', 'regex:'.self::OFFSET_REGEX, 'after:starts_at'],
         ];
     }
 
@@ -65,7 +68,8 @@ class StoreBookingRequest extends FormRequest
             'exists' => 'Указанная «:attribute» не существует.',
             'string' => 'Поле «:attribute» должно быть строкой.',
             'max.string' => 'Поле «:attribute» не должно быть длиннее :max символов.',
-            'date' => 'Поле «:attribute» должно быть датой в формате ISO 8601.',
+            'date' => 'Поле «:attribute» должно быть корректной датой.',
+            'regex' => 'Поле «:attribute» должно быть датой ISO 8601 с явным смещением UTC, например 2026-11-06T10:00:00+03:00 или 2026-11-06T07:00:00Z.',
             'after' => 'Поле «:attribute» должно быть позже начала брони.',
         ];
     }
