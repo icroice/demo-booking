@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreBookingRequest;
 use App\Models\Booking;
 use App\Models\Room;
-use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class BookingController extends Controller
@@ -18,28 +18,31 @@ class BookingController extends Controller
             ->paginate(20);
     }
 
-    public function store(Request $request)
+    public function store(StoreBookingRequest $request): JsonResponse
     {
-        $conflict = DB::select("SELECT id FROM bookings
-            WHERE room_id = {$request->room_id}
-            AND starts_at <= '{$request->ends_at}'
-            AND ends_at >= '{$request->starts_at}'");
+        // Даты нормализованы в UTC в StoreBookingRequest; сравнение строгое —
+        // встречи «впритык» (оканчивается в 11:00, начинается в 11:00) конфликтом не считаются.
+        $conflict = Booking::query()
+            ->where('room_id', $request->room()->id)
+            ->where('starts_at', '<', $request->endsAt())
+            ->where('ends_at', '>', $request->startsAt())
+            ->exists();
 
         if ($conflict) {
             return response()->json(['error' => 'Комната занята'], 409);
         }
 
-        $start = Carbon::parse($request->starts_at);
-        if ($start->hour < 9 || $start->hour >= 20) {
-            return response()->json(['error' => 'Нерабочее время'], 422);
-        }
+        $booking = Booking::create([
+            'room_id' => $request->room()->id,
+            'user_id' => $request->user()->id,
+            'title' => $request->validated('title'),
+            'starts_at' => $request->startsAt(),
+            'ends_at' => $request->endsAt(),
+        ]);
 
-        $booking = Booking::create($request->all());
+        Log::channel('bookings')->info('Booking created', ['booking_id' => $booking->id]);
 
-        Log::withContext(['booking_id' => $booking->id]);
-        Log::channel('bookings')->info('Booking created');
-
-        return $booking;
+        return response()->json($booking, 201);
     }
 
     public function destroy($id)
@@ -55,7 +58,7 @@ class BookingController extends Controller
             ->whereDate('starts_at', today())
             ->get()
             ->map(fn ($b) => [
-                'time' => $b->starts_at . ' – ' . $b->ends_at,
+                'time' => $b->starts_at.' – '.$b->ends_at,
                 'author' => $b->user->name,
             ]);
     }
