@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreBookingRequest;
 use App\Models\Booking;
 use App\Models\Room;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -33,13 +34,22 @@ class BookingController extends Controller
             return response()->json(['error' => 'Комната занята'], 409);
         }
 
-        $booking = Booking::create([
-            'room_id' => $request->room()->id,
-            'user_id' => $request->user()->id,
-            'title' => $request->validated('title'),
-            'starts_at' => $request->startsAt(),
-            'ends_at' => $request->endsAt(),
-        ]);
+        try {
+            $booking = Booking::create([
+                'room_id' => $request->room()->id,
+                'user_id' => $request->user()->id,
+                'title' => $request->validated('title'),
+                'starts_at' => $request->startsAt(),
+                'ends_at' => $request->endsAt(),
+            ]);
+        } catch (QueryException $e) {
+            // 23P01 — exclusion_violation: слот заняли между проверкой и вставкой (гонка).
+            if ($e->getCode() === '23P01') {
+                return response()->json(['error' => 'Комната занята'], 409);
+            }
+
+            throw $e;
+        }
 
         Log::channel('bookings')->info('Booking created', ['booking_id' => $booking->id]);
 
